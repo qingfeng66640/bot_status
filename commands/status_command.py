@@ -95,7 +95,7 @@ class StatusCommand(BaseCommand):
     # ------------------------------------------------------------------
 
     @cmd_route()
-    async def execute(self, message_text) -> tuple[bool, str]:
+    async def execute(self, message_text: str = "") -> tuple[bool, str]:
         """执行命令的入口点（mpdt 组件检查要求）。"""
         return await self.handle_all()
 
