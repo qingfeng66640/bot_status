@@ -72,6 +72,7 @@ class StatusCommand(BaseCommand):
             renderer = ImageRenderer()
             # 获取用户配置的 style
             style_dict = {}
+            custom_html_path = ""
             cfg = self._cfg
             if cfg is not None and getattr(cfg, "style", None) is not None:
                 style_dict = {
@@ -83,7 +84,10 @@ class StatusCommand(BaseCommand):
                     "danger_color": cfg.style.danger_color,
                     "border_radius": cfg.style.border_radius,
                 }
-            image_base64 = await renderer.render_to_base64(title, sections, style=style_dict)
+                custom_html_path = getattr(cfg.style, "custom_html_path", "")
+            image_base64 = await renderer.render_to_base64(
+                title, sections, style=style_dict, custom_template_path=custom_html_path
+            )
             success = await send_image(image_base64, stream_id=self.stream_id)
             return (True, "ok") if success else (False, "send_failed")
         except Exception as e:
@@ -95,9 +99,13 @@ class StatusCommand(BaseCommand):
     # ------------------------------------------------------------------
 
     @cmd_route()
-    async def execute(self, message_text: str = "") -> tuple[bool, str]:
-        """执行命令的入口点（mpdt 组件检查要求）。"""
+    async def _handle_default(self) -> tuple[bool, str]:
+        """默认路由（无子命令时触发），展示全部状态。"""
         return await self.handle_all()
+
+    async def execute(self, message_text: str = "") -> tuple[bool, str]:
+        """执行命令的入口点（mpdt 组件检查要求），委托父类进行路由分发。"""
+        return await super().execute(message_text)
 
     @cmd_route("runtime")
     async def handle_runtime(self) -> tuple[bool, str]:

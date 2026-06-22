@@ -177,12 +177,13 @@
   .card-accent {
     height: 3px;
     width: 100%;
+    background-color: var(--accent-color); /* 默认使用高亮指示色 */
   }
-  .card-accent.blue   { background-color: #4a5568; } /* 换掉过时的蓝色科技元素，使用冷灰 */
+  .card-accent.blue   { background-color: var(--accent-color); }
   .card-accent.green  { background-color: var(--success-color); }
   .card-accent.orange { background-color: var(--accent-color); }
-  .card-accent.purple { background-color: #6b7280; } /* 暗灰色 */
-  .card-accent.cyan   { background-color: var(--success-color); }
+  .card-accent.purple { background-color: var(--accent-color); }
+  .card-accent.cyan   { background-color: var(--accent-color); }
   .card-accent.red    { background-color: var(--danger-color); }
 
   .card-body {

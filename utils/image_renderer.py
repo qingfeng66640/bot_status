@@ -44,7 +44,7 @@ def _accent_class(title: str) -> str:
         "任务": "green", "task": "green",
         "事件": "purple", "event": "purple",
         "消息": "blue", "message": "blue",
-        "聊天流": "cyan", "stream": "cyan",
+        "流": "cyan", "stream": "cyan",
         "插件": "purple", "plugin": "purple",
         "组件": "blue", "component": "blue",
         "LLM": "orange", "llm": "orange",
@@ -77,15 +77,31 @@ class ImageRenderer:
         title: str,
         sections: list[dict[str, Any]],
         style: dict[str, str] | None = None,
+        custom_template_path: str = "",
     ) -> str:
         """渲染状态数据为 base64 PNG。
 
         sections 格式: [{"title": str, "rows": [(key, value), ...]}]
         value 可以是 str / int / float / bool / list。
         style 支持传入自定义颜色和圆角配置字典。
+        custom_template_path 支持指定外部 HTML 模板文件的绝对路径。
         """
         processed = self._process_sections(sections)
-        tmpl = self._env.get_template("status.html")
+
+        if custom_template_path:
+            p = Path(custom_template_path)
+            if p.is_file():
+                # 使用 FileSystemLoader 直接加载自定义路径的模板文件
+                custom_env = jinja2.Environment(
+                    loader=jinja2.FileSystemLoader(str(p.parent)),
+                    autoescape=True,
+                )
+                tmpl = custom_env.get_template(p.name)
+            else:
+                raise FileNotFoundError(f"未找到指定的自定义 HTML 模板文件: {custom_template_path}")
+        else:
+            tmpl = self._env.get_template("status.html")
+
         html = tmpl.render(
             title=title,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

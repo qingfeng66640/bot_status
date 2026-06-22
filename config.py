@@ -87,6 +87,10 @@ class BotStatusConfig(BaseConfig):
             default="4px",
             description="机架卡片圆角，默认为 4px（提供微小圆润感）"
         )
+        custom_html_path: str = Field(
+            default="",
+            description="自定义 HTML 模板文件绝对路径，留空则使用默认模板"
+        )
 
     plugin: PluginSection = Field(default_factory=PluginSection)
     runtime: RuntimeSection = Field(default_factory=RuntimeSection)
