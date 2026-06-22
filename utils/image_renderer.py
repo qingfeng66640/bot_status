@@ -1,12 +1,15 @@
 """Bot 状态图片渲染工具。
 
 使用 Jinja2 模板 + Playwright 无头浏览器将状态数据渲染为高清 PNG 图片。
+如果 Playwright 浏览器二进制文件缺失，首次调用时会自动下载安装。
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -20,14 +23,52 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 _pw: Any = None
 _browser: Any = None
 _lock = asyncio.Lock()
+_browser_installed = False
+
+
+def _ensure_playwright_browser() -> None:
+    """确保 Playwright Chromium 浏览器及系统依赖已安装，缺失时自动下载。"""
+    global _browser_installed
+    if _browser_installed:
+        return
+    # 1. 安装 Chromium 浏览器二进制
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        # 网络/权限问题，后续 launch 时会抛出清晰的错误
+        pass
+    # 2. 尝试安装系统级依赖（Docker 中通常缺 libnss3 等 .so 文件）
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "playwright", "install-deps", "chromium"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=True,
+        )
+    except subprocess.CalledProcessError:
+        # 非 root 环境可能无 sudo 权限，忽略
+        pass
+    _browser_installed = True
 
 
 async def _get_browser():
-    """获取全局复用的异步浏览器实例（线程安全）。"""
+    """获取全局复用的异步浏览器实例（线程安全）。
+
+    首次调用时自动检测并安装缺失的 Chromium 浏览器二进制文件，
+    之后复用已启动的浏览器实例。
+    """
     global _pw, _browser
     if _browser is None:
         async with _lock:
             if _browser is None:
+                _ensure_playwright_browser()
                 _pw = await async_playwright().start()
                 _browser = await _pw.chromium.launch(
                     headless=True,

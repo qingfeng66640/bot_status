@@ -1,7 +1,7 @@
 {
     "name": "bot_status",
     "display_name": "Bot 状态",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "通过 /status 命令查询并展示 Bot 运行时状态、业务数据和 LLM 指标，以图片形式输出",
     "author": "qf",
     "license": "GPL-3.0",
