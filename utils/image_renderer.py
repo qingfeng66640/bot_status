@@ -1,7 +1,7 @@
 """Bot 状态图片渲染工具。
 
 使用 Jinja2 模板 + Playwright 无头浏览器将状态数据渲染为高清 PNG 图片。
-如果 Playwright 浏览器二进制文件缺失，首次调用时会自动下载安装。
+首次调用时自动下载安装 Playwright Chromium 浏览器及系统依赖。
 """
 
 from __future__ import annotations
@@ -23,57 +23,77 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 _pw: Any = None
 _browser: Any = None
 _lock = asyncio.Lock()
-_browser_installed = False
+_browser_ready = False
+
+
+class BrowserNotAvailableError(Exception):
+    """Playwright Chromium 浏览器未安装或无法启动。"""
 
 
 def _ensure_playwright_browser() -> None:
-    """确保 Playwright Chromium 浏览器及系统依赖已安装，缺失时自动下载。"""
-    global _browser_installed
-    if _browser_installed:
+    """确保 Playwright Chromium 浏览器及系统依赖已安装，缺失时自动下载。
+
+    Chromium 约 150MB，Docker 首次下载可能需要数分钟。
+    """
+    global _browser_ready
+    if _browser_ready:
         return
-    # 1. 安装 Chromium 浏览器二进制
+
+    # 1. 安装 Chromium 浏览器二进制（600s 超时，适应国内网络）
     try:
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=600,
             check=True,
         )
     except subprocess.CalledProcessError:
-        # 网络/权限问题，后续 launch 时会抛出清晰的错误
         pass
-    # 2. 尝试安装系统级依赖（Docker 中通常缺 libnss3 等 .so 文件）
+
+    # 2. 安装系统级依赖（300s 超时）
     try:
         subprocess.run(
             [sys.executable, "-m", "playwright", "install-deps", "chromium"],
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=300,
             check=True,
         )
     except subprocess.CalledProcessError:
-        # 非 root 环境可能无 sudo 权限，忽略
         pass
-    _browser_installed = True
+
+    _browser_ready = True
 
 
 async def _get_browser():
     """获取全局复用的异步浏览器实例（线程安全）。
 
-    首次调用时自动检测并安装缺失的 Chromium 浏览器二进制文件，
-    之后复用已启动的浏览器实例。
+    首次调用时自动安装缺失的 Chromium 浏览器及系统依赖。
     """
     global _pw, _browser
     if _browser is None:
         async with _lock:
             if _browser is None:
                 _ensure_playwright_browser()
-                _pw = await async_playwright().start()
-                _browser = await _pw.chromium.launch(
-                    headless=True,
-                    args=["--disable-gpu", "--no-sandbox", "--disable-setuid-sandbox"],
-                )
+                try:
+                    _pw = await async_playwright().start()
+                    _browser = await _pw.chromium.launch(
+                        headless=True,
+                        args=["--disable-gpu", "--no-sandbox", "--disable-setuid-sandbox"],
+                    )
+                except Exception as e:
+                    msg = str(e)
+                    if "Executable doesn't exist" in msg:
+                        raise BrowserNotAvailableError(
+                            "Playwright Chromium 浏览器未安装，请在部署环境中执行：\n"
+                            "  playwright install chromium\n"
+                            "  playwright install-deps chromium\n"
+                            "Docker 部署请在 Dockerfile 构建阶段添加以上两条命令。"
+                        ) from e
+                    raise BrowserNotAvailableError(
+                        f"Playwright 浏览器启动失败: {msg}"
+                    ) from e
     return _browser
 
 
@@ -101,7 +121,7 @@ class ImageRenderer:
     """Bot 状态图片渲染器 — HTML + 浏览器截图方案。
 
     使用 Jinja2 模板渲染 HTML，通过 Playwright 截图转为 PNG。
-    浏览器实例在首次使用时启动并全局复用，首次约 1s，后续毫秒级。
+    浏览器实例在首次使用时启动并全局复用。
     """
 
     WIDTH = 720
@@ -132,7 +152,6 @@ class ImageRenderer:
         if custom_template_path:
             p = Path(custom_template_path)
             if p.is_file():
-                # 使用 FileSystemLoader 直接加载自定义路径的模板文件
                 custom_env = jinja2.Environment(
                     loader=jinja2.FileSystemLoader(str(p.parent)),
                     autoescape=True,

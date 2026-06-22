@@ -17,7 +17,7 @@ from src.app.plugin_system.base import BaseCommand, cmd_route
 from src.app.plugin_system.types import PermissionLevel
 
 from ..managers.status_manager import get_status_manager
-from ..utils.image_renderer import ImageRenderer
+from ..utils.image_renderer import ImageRenderer, BrowserNotAvailableError
 
 logger = get_logger("bot_status.command")
 
@@ -90,6 +90,9 @@ class StatusCommand(BaseCommand):
             )
             success = await send_image(image_base64, stream_id=self.stream_id)
             return (True, "ok") if success else (False, "send_failed")
+        except BrowserNotAvailableError as e:
+            logger.warning(f"Chromium 浏览器未就绪: {e}")
+            return False, str(e)
         except Exception as e:
             logger.error(f"渲染或发送状态图片失败: {e}", exc_info=True)
             return False, str(e)
