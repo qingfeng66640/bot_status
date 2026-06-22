@@ -1,7 +1,7 @@
 {
     "name": "bot_status",
     "display_name": "Bot 状态",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "description": "通过 /status 命令查询并展示 Bot 运行时状态、业务数据和 LLM 指标，以图片形式输出",
     "author": "qf",
     "license": "GPL-3.0",
@@ -19,5 +19,10 @@
         }
     ],
     "entry_point": "plugin.py",
-    "min_core_version": "1.2.0-rc"
+    "min_core_version": "1.2.0-rc",
+    "python_dependencies": [
+        "jinja2>=3.1.0",
+        "playwright>=1.50.0"
+    ],
+    "dependencies_required": true
 }
