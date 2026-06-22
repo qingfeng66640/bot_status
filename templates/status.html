@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg-color: {{ style.bg_color | default('#0d0f12') }};
+    --border-color: {{ style.border_color | default('#2d3748') }};
+    --accent-color: {{ style.accent_color | default('#ff9100') }};
+    --success-color: {{ style.success_color | default('#00ff66') }};
+    --warning-color: {{ style.warning_color | default('#ff9100') }};
+    --danger-color: {{ style.danger_color | default('#ff1744') }};
+    --border-radius: {{ style.border_radius | default('4px') }};
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: "JetBrains Mono", "SF Mono", Consolas, Menlo, Monaco, "Courier New", Courier, "Microsoft YaHei", monospace;
+    background-color: var(--bg-color);
+    /* 16px 网格线，模拟经典CRT显示器与工业终端，支持动态背景色微调 */
+    background-image:
+      linear-gradient(rgba(45, 55, 72, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(45, 55, 72, 0.08) 1px, transparent 1px),
+      linear-gradient(rgba(255, 255, 255, 0.007) 50%, rgba(0, 0, 0, 0.1) 50%);
+    background-size: 16px 16px, 16px 16px, 100% 4px;
+    color: #a0aec0;
+    padding: 24px 30px;
+    width: 720px;
+  }
+
+  /* 工业机箱外框 */
+  .rack-chassis {
+    border: 4px solid #1a202c;
+    background: #0f1319;
+    padding: 20px;
+    position: relative;
+    border-radius: var(--border-radius);
+    box-shadow:
+      inset 0 0 20px rgba(0, 0, 0, 0.9),
+      0 10px 30px rgba(0, 0, 0, 0.6);
+  }
+
+  /* 模拟机架拉把 (Rack Mount Handles) */
+  .rack-chassis::before, .rack-chassis::after {
+    content: "";
+    position: absolute;
+    top: 40px;
+    width: 6px;
+    height: 120px;
+    background: #2d3748;
+    border: 2px solid #4a5568;
+    box-shadow: 1px 1px 3px rgba(0,0,0,0.5);
+  }
+  .rack-chassis::before { left: -10px; border-radius: 3px 0 0 3px; }
+  .rack-chassis::after { right: -10px; border-radius: 0 3px 3px 0; }
+
+  .header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    margin-bottom: 20px;
+    background: #141923;
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+    position: relative;
+  }
+
+  /* 左右双重工业警示斜纹装饰条 (Hazard Stripes)，模拟标准19英寸机柜挂耳 */
+  .header::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    background: repeating-linear-gradient(
+      -45deg,
+      var(--accent-color),
+      var(--accent-color) 6px,
+      #141923 6px,
+      #141923 12px
+    );
+  }
+  .header::after {
+    content: "";
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 6px;
+    background: repeating-linear-gradient(
+      45deg,
+      var(--accent-color),
+      var(--accent-color) 6px,
+      #141923 6px,
+      #141923 12px
+    );
+  }
+
+  .header-title {
+    font-size: 16px;
+    font-weight: 900;
+    color: #e2e8f0;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    letter-spacing: 1.5px;
+    padding-left: 8px;
+  }
+
+  /* 矩形点阵 LED 状态灯 */
+  .header-dot {
+    width: 14px;
+    height: 10px;
+    background: var(--success-color); /* 动态配置指示灯 */
+    display: inline-block;
+    border: 2px solid #003311;
+    box-shadow: 0 0 8px var(--success-color);
+    animation: flash 2s infinite steps(2);
+  }
+
+  @keyframes flash {
+    0%, 100% { background-color: var(--success-color); box-shadow: 0 0 10px var(--success-color); }
+    50% { background-color: #004411; box-shadow: none; }
+  }
+
+  .header-time {
+    font-size: 12px;
+    color: #718096;
+    font-weight: bold;
+    letter-spacing: 1px;
+  }
+
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  /* 当只有一个 Section 时占满整行 */
+  .cards:has(> :last-child:first-child) {
+    grid-template-columns: 1fr;
+  }
+  /* 最后一个横跨两列 */
+  .card:last-child:nth-child(odd) {
+    grid-column: span 2;
+  }
+
+  .card {
+    background: #12161f;
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius);
+    box-shadow:
+      inset 0 0 12px rgba(0, 0, 0, 0.95),
+      3px 3px 0px rgba(0, 0, 0, 0.7);
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  /* 模拟机电设备的固定螺丝扣 */
+  .card::before, .card::after {
+    content: "⊕";
+    position: absolute;
+    font-size: 10px;
+    color: #4a5568;
+    line-height: 1;
+  }
+  .card::before { top: 4px; left: 6px; }
+  .card::after { bottom: 4px; right: 6px; }
+
+  /* 模块顶部的硬边工业色彩标志，替换为工控警示色 */
+  .card-accent {
+    height: 3px;
+    width: 100%;
+  }
+  .card-accent.blue   { background-color: #4a5568; } /* 换掉过时的蓝色科技元素，使用冷灰 */
+  .card-accent.green  { background-color: var(--success-color); }
+  .card-accent.orange { background-color: var(--accent-color); }
+  .card-accent.purple { background-color: #6b7280; } /* 暗灰色 */
+  .card-accent.cyan   { background-color: var(--success-color); }
+  .card-accent.red    { background-color: var(--danger-color); }
+
+  .card-body {
+    padding: 18px 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-title {
+    font-size: 13px;
+    font-weight: 900;
+    color: #e2e8f0;
+    margin-bottom: 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid var(--border-color);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    display: flex;
+    justify-content: space-between;
+  }
+  .card-title-prefix {
+    color: var(--accent-color);
+  }
+
+  .card-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    flex: 1;
+  }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .row-key {
+    color: #718096;
+    flex-shrink: 0;
+    font-weight: bold;
+    text-transform: uppercase;
+  }
+
+  .row-dots {
+    flex-grow: 1;
+    border-bottom: 1px dashed var(--border-color);
+    height: 1em;
+    margin: 0 6px;
+  }
+
+  .row-value {
+    color: #e2e8f0;
+    font-weight: bold;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    /* 解决溢出：控制最大宽度并自动折行，保证长列表（如适配器签名）不超出边框 */
+    max-width: 180px;
+    word-break: break-all;
+    white-space: normal;
+  }
+
+  /* 适配器或者列表多的时候折行布局，且卡片中最后一行可以自适应宽度 */
+  .cards:has(> :last-child:first-child) .row-value,
+  .card:last-child:nth-child(odd) .row-value {
+    max-width: 400px;
+  }
+
+  /* 工业级对比度数值高亮 */
+  .row-value.num {
+    color: var(--accent-color); /* 动态配置指示色 */
+  }
+  .row-value.cost {
+    color: var(--accent-color);
+  }
+  .row-value.good {
+    color: var(--success-color); /* 荧光绿色 */
+  }
+  .row-value.bad {
+    color: var(--danger-color); /* 警示红色 */
+  }
+  .row-value.str {
+    color: #e2e8f0;
+  }
+
+  /* 矩形物理 LED 状态色块 */
+  .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 1px;
+    display: inline-block;
+    margin-right: 6px;
+    vertical-align: middle;
+    border: 1px solid rgba(0, 0, 0, 0.6);
+  }
+  .status-dot.ok {
+    background-color: var(--success-color);
+    box-shadow: 0 0 6px var(--success-color);
+  }
+  .status-dot.err {
+    background-color: var(--danger-color);
+    box-shadow: 0 0 6px var(--danger-color);
+  }
+
+  /* 工业防护式进度条系统，使用高对比度底轨 */
+  .bar-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .bar-track {
+    width: 100px;
+    height: 12px;
+    background-color: #171d26;
+    border: 2px solid var(--border-color);
+    padding: 1px;
+    overflow: hidden;
+    display: inline-block;
+    vertical-align: middle;
+    border-radius: calc(var(--border-radius) / 2);
+  }
+  .bar-fill {
+    height: 100%;
+    display: block;
+    /* 工业防滑警示斜纹 */
+    background-size: 14px 14px;
+    image-rendering: pixelated;
+    border-radius: calc(var(--border-radius) / 2);
+  }
+
+  .bar-fill.high  {
+    background-color: var(--success-color);
+    background-image: linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0.2) 25%,
+      transparent 25%,
+      transparent 50%,
+      rgba(0, 0, 0, 0.2) 50%,
+      rgba(0, 0, 0, 0.2) 75%,
+      transparent 75%,
+      transparent
+    );
+  }
+  .bar-fill.mid   {
+    background-color: var(--warning-color);
+    background-image: linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0.2) 25%,
+      transparent 25%,
+      transparent 50%,
+      rgba(0, 0, 0, 0.2) 50%,
+      rgba(0, 0, 0, 0.2) 75%,
+      transparent 75%,
+      transparent
+    );
+  }
+  .bar-fill.low   {
+    background-color: var(--danger-color);
+    background-image: linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0.2) 25%,
+      transparent 25%,
+      transparent 50%,
+      rgba(0, 0, 0, 0.2) 50%,
+      rgba(0, 0, 0, 0.2) 75%,
+      transparent 75%,
+      transparent
+    );
+  }
+
+  .footer {
+    margin-top: 20px;
+    padding: 8px 16px;
+    background: #141923;
+    border: 2px solid var(--border-color);
+    border-radius: var(--border-radius);
+    text-align: center;
+    font-size: 10px;
+    color: #4a5568;
+    font-weight: bold;
+    letter-spacing: 2px;
+  }
+</style>
+</head>
+<body>
+
+<div class="rack-chassis">
+  <div class="header">
+    <div class="header-title">
+      <span class="header-dot"></span>{{ title }}
+    </div>
+    <div class="header-time">SYS_TIME: {{ timestamp }}</div>
+  </div>
+
+  <div class="cards">
+    {% for s in sections %}
+    <div class="card">
+      <div class="card-accent {{ s.accent }}"></div>
+      <div class="card-body">
+        <div class="card-title">
+          <span>// {{ s.title }}</span>
+          <span class="card-title-prefix">[ACTIVE]</span>
+        </div>
+        <div class="card-rows">
+          {% for r in s.rows %}
+          <div class="row">
+            <span class="row-key">{{ r.key }}</span>
+            <span class="row-dots"></span>
+            <span class="row-value {{ r.css }}">{{ r.value | safe }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="footer">NEO-MOFOX MONITORING UNIT // SYS_STATUS_OK // REV_2026.06</div>
+</div>
+
+</body>
+</html>
