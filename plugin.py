@@ -27,7 +27,7 @@ class BotStatusPlugin(BasePlugin):
     plugin_description: str = (
         "通过 /status 命令查询并展示 Bot 运行时状态、业务数据和 LLM 指标"
     )
-    plugin_version: str = "1.0.5"
+    plugin_version: str = "1.0.6"
 
     configs: list[type] = [BotStatusConfig]
     dependent_components: list[str] = []

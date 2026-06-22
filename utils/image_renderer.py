@@ -1,15 +1,17 @@
 """Bot 状态图片渲染工具。
 
 使用 Jinja2 模板 + Playwright 无头浏览器将状态数据渲染为高清 PNG 图片。
-首次调用时自动下载安装 Playwright Chromium 浏览器及系统依赖。
+模块导入时自动启动后台线程下载 Chromium，首次 /status 请求不需等待。
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
+import os
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -23,23 +25,29 @@ _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 _pw: Any = None
 _browser: Any = None
 _lock = asyncio.Lock()
-_browser_ready = False
+
+# 后台安装状态
+_install_state = {"done": False, "error": None, "started": False}
+_install_lock = threading.Lock()
 
 
 class BrowserNotAvailableError(Exception):
-    """Playwright Chromium 浏览器未安装或无法启动。"""
+    """Playwright Chromium 浏览器未就绪（仍在后台下载中或安装失败）。"""
 
 
-def _ensure_playwright_browser() -> None:
-    """确保 Playwright Chromium 浏览器及系统依赖已安装，缺失时自动下载。
+def _install_chromium_background() -> None:
+    """后台线程：通过国内镜像下载 Chromium 浏览器 + 系统依赖。"""
+    global _install_state
 
-    Chromium 约 150MB，Docker 首次下载可能需要数分钟。
-    """
-    global _browser_ready
-    if _browser_ready:
-        return
+    with _install_lock:
+        if _install_state["started"]:
+            return
+        _install_state["started"] = True
 
-    # 1. 安装 Chromium 浏览器二进制（600s 超时，适应国内网络）
+    # 国内镜像加速 Playwright 浏览器下载
+    env = {**os.environ, "PLAYWRIGHT_DOWNLOAD_HOST": "https://npmmirror.com/mirrors/playwright/"}
+
+    # 1. 安装 Chromium 浏览器二进制
     try:
         subprocess.run(
             [sys.executable, "-m", "playwright", "install", "chromium"],
@@ -47,11 +55,14 @@ def _ensure_playwright_browser() -> None:
             text=True,
             timeout=600,
             check=True,
+            env=env,
         )
-    except subprocess.CalledProcessError:
-        pass
+    except subprocess.CalledProcessError as e:
+        with _install_lock:
+            _install_state["error"] = f"Chromium 下载失败: {e.stderr or e}"
+        return
 
-    # 2. 安装系统级依赖（300s 超时）
+    # 2. 安装系统级依赖
     try:
         subprocess.run(
             [sys.executable, "-m", "playwright", "install-deps", "chromium"],
@@ -63,19 +74,37 @@ def _ensure_playwright_browser() -> None:
     except subprocess.CalledProcessError:
         pass
 
-    _browser_ready = True
+    with _install_lock:
+        _install_state["done"] = True
+
+
+def _get_install_status() -> dict:
+    """获取当前 Chromium 安装状态（线程安全）。"""
+    with _install_lock:
+        return dict(_install_state)
+
+
+# 模块导入时立即启动后台下载（非阻塞）
+_bg_thread = threading.Thread(target=_install_chromium_background, daemon=True, name="pwt-install")
+_bg_thread.start()
 
 
 async def _get_browser():
     """获取全局复用的异步浏览器实例（线程安全）。
 
-    首次调用时自动安装缺失的 Chromium 浏览器及系统依赖。
+    如果 Chromium 仍在后台下载中，抛出 BrowserNotAvailableError 并提示稍后重试。
     """
     global _pw, _browser
+
+    status = _get_install_status()
+    if status["error"]:
+        raise BrowserNotAvailableError(f"Chromium 安装失败: {status['error']}")
+    if not status["done"]:
+        raise BrowserNotAvailableError("Chromium 浏览器正在后台下载中，请稍后重试。首次下载约需 2-5 分钟。")
+
     if _browser is None:
         async with _lock:
             if _browser is None:
-                _ensure_playwright_browser()
                 try:
                     _pw = await async_playwright().start()
                     _browser = await _pw.chromium.launch(
@@ -88,8 +117,7 @@ async def _get_browser():
                         raise BrowserNotAvailableError(
                             "Playwright Chromium 浏览器未安装，请在部署环境中执行：\n"
                             "  playwright install chromium\n"
-                            "  playwright install-deps chromium\n"
-                            "Docker 部署请在 Dockerfile 构建阶段添加以上两条命令。"
+                            "  playwright install-deps chromium"
                         ) from e
                     raise BrowserNotAvailableError(
                         f"Playwright 浏览器启动失败: {msg}"

@@ -17,7 +17,7 @@ from src.app.plugin_system.base import BaseCommand, cmd_route
 from src.app.plugin_system.types import PermissionLevel
 
 from ..managers.status_manager import get_status_manager
-from ..utils.image_renderer import ImageRenderer, BrowserNotAvailableError
+from ..utils.image_renderer import BrowserNotAvailableError, ImageRenderer
 
 logger = get_logger("bot_status.command")
 
