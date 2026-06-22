@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-import os
 import subprocess
 import sys
 import threading
@@ -36,16 +35,13 @@ class BrowserNotAvailableError(Exception):
 
 
 def _install_chromium_background() -> None:
-    """后台线程：通过国内镜像下载 Chromium 浏览器 + 系统依赖。"""
+    """后台线程：下载 Chromium 浏览器 + 系统依赖，不阻塞主流程。"""
     global _install_state
 
     with _install_lock:
         if _install_state["started"]:
             return
         _install_state["started"] = True
-
-    # 国内镜像加速 Playwright 浏览器下载
-    env = {**os.environ, "PLAYWRIGHT_DOWNLOAD_HOST": "https://npmmirror.com/mirrors/playwright/"}
 
     # 1. 安装 Chromium 浏览器二进制
     try:
@@ -55,7 +51,6 @@ def _install_chromium_background() -> None:
             text=True,
             timeout=600,
             check=True,
-            env=env,
         )
     except subprocess.CalledProcessError as e:
         with _install_lock:
