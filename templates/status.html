@@ -11,6 +11,10 @@
     --warning-color: {{ style.warning_color | default('#ff9100') }};
     --danger-color: {{ style.danger_color | default('#ff1744') }};
     --border-radius: {{ style.border_radius | default('4px') }};
+    --text-color: {{ style.text_color | default('#e2e8f0') }};
+    --label-color: {{ style.label_color | default('#718096') }};
+    --metric-color: {{ style.metric_color | default('#ff9100') }};
+    --title-color: {{ style.title_color | default('#e2e8f0') }};
   }
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -103,7 +107,7 @@
   .header-title {
     font-size: 16px;
     font-weight: 900;
-    color: #e2e8f0;
+    color: var(--title-color);
     text-transform: uppercase;
     display: flex;
     align-items: center;
@@ -130,7 +134,7 @@
 
   .header-time {
     font-size: 12px;
-    color: #718096;
+    color: var(--label-color);
     font-weight: bold;
     letter-spacing: 1px;
   }
@@ -196,7 +200,7 @@
   .card-title {
     font-size: 13px;
     font-weight: 900;
-    color: #e2e8f0;
+    color: var(--text-color);
     margin-bottom: 12px;
     padding-bottom: 6px;
     border-bottom: 2px solid var(--border-color);
@@ -226,7 +230,7 @@
   }
 
   .row-key {
-    color: #718096;
+    color: var(--label-color);
     flex-shrink: 0;
     font-weight: bold;
     text-transform: uppercase;
@@ -240,7 +244,7 @@
   }
 
   .row-value {
-    color: #e2e8f0;
+    color: var(--metric-color);
     font-weight: bold;
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -258,10 +262,10 @@
 
   /* 工业级对比度数值高亮 */
   .row-value.num {
-    color: var(--accent-color); /* 动态配置指示色 */
+    color: var(--metric-color); /* 动态配置参数指标色 */
   }
   .row-value.cost {
-    color: var(--accent-color);
+    color: var(--metric-color);
   }
   .row-value.good {
     color: var(--success-color); /* 荧光绿色 */
@@ -270,7 +274,7 @@
     color: var(--danger-color); /* 警示红色 */
   }
   .row-value.str {
-    color: #e2e8f0;
+    color: var(--metric-color);
   }
 
   /* 矩形物理 LED 状态色块 */

@@ -75,10 +75,10 @@ class StatusManager:
 
         total = await QueryBuilder(Messages).filter(time__gte=start_ts).count()
         inbound = await QueryBuilder(Messages).filter(
-            time__gte=start_ts, person_id__isnull=False
+            time__gte=start_ts, person_id__ne="bot"
         ).count()
         outbound = await QueryBuilder(Messages).filter(
-            time__gte=start_ts, person_id__isnull=True
+            time__gte=start_ts, person_id="bot"
         ).count()
 
         stream_manager = get_stream_manager()

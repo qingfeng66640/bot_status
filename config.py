@@ -87,6 +87,22 @@ class BotStatusConfig(BaseConfig):
             default="4px",
             description="机架卡片圆角，默认为 4px（提供微小圆润感）"
         )
+        text_color: str = Field(
+            default="#e2e8f0",
+            description="主文字颜色，用于卡片标题 (如 #e2e8f0)"
+        )
+        label_color: str = Field(
+            default="#718096",
+            description="标签文字颜色，用于数据行左侧的字段名称 (如 #718096)"
+        )
+        metric_color: str = Field(
+            default="#ff9100",
+            description="参数字体颜色，用于所有数据行右侧的值（数值、字符串、列表等）(如 #ff9100)"
+        )
+        title_color: str = Field(
+            default="#e2e8f0",
+            description="标题文字颜色，用于 header-title 主标题 (如 #e2e8f0)"
+        )
         custom_html_path: str = Field(
             default="",
             description="自定义 HTML 模板文件绝对路径，留空则使用默认模板"

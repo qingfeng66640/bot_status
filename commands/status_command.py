@@ -84,6 +84,10 @@ class StatusCommand(BaseCommand):
                     "warning_color": cfg.style.warning_color,
                     "danger_color": cfg.style.danger_color,
                     "border_radius": cfg.style.border_radius,
+                    "text_color": getattr(cfg.style, "text_color", "#e2e8f0"),
+                    "label_color": getattr(cfg.style, "label_color", "#718096"),
+                    "metric_color": getattr(cfg.style, "metric_color", "#ff9100"),
+                    "title_color": getattr(cfg.style, "title_color", "#e2e8f0"),
                 }
                 custom_html_path = getattr(cfg.style, "custom_html_path", "")
                 chromium_cache_path = getattr(cfg.style, "chromium_cache_path", "")

@@ -25,6 +25,9 @@ _log = get_logger("bot_status.image")
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
+# 插件自身 data 目录下的 Chromium 缓存路径
+_PLUGIN_PLAYWRIGHT_DIR = Path(__file__).resolve().parent.parent / "data" / "playwright"
+
 # 全局浏览器实例（懒启动，复用）
 _pw: Any = None
 _browser: Any = None
@@ -49,6 +52,37 @@ class BrowserNotAvailableError(Exception):
     """Playwright Chromium 浏览器未就绪（仍在后台下载中或安装失败）。"""
 
 
+def _find_chromium_executable(search_root: str | Path) -> str | None:
+    """在指定目录中递归搜索 Chromium 可执行文件，返回找到的第一个路径。"""
+    cache_dir = Path(search_root)
+    if not cache_dir.is_dir():
+        return None
+    headless = sorted(cache_dir.glob("**/chrome-headless-shell-linux64/chrome-headless-shell"), reverse=True)
+    chrome = sorted(cache_dir.glob("**/chrome-linux64/chrome"), reverse=True)
+    win_headless = sorted(cache_dir.glob("**/chrome-headless-shell-win64/chrome-headless-shell.exe"), reverse=True)
+    win_chrome = sorted(cache_dir.glob("**/chrome-win64/chrome.exe"), reverse=True)
+    candidates = headless + chrome + win_headless + win_chrome
+    if candidates:
+        path = str(candidates[0])
+        os.chmod(path, 0o755)
+        return path
+    return None
+
+
+def _get_default_playwright_cache_dirs() -> list[Path]:
+    """返回 Playwright 在各平台的默认浏览器缓存目录列表。"""
+    home = Path.home()
+    if sys.platform == "win32":
+        return [home / "AppData" / "Local" / "ms-playwright"]
+    elif sys.platform == "darwin":
+        return [home / "Library" / "Caches" / "ms-playwright"]
+    else:
+        return [
+            home / ".cache" / "ms-playwright",
+            Path("/root/.cache/ms-playwright"),
+        ]
+
+
 def _check_mirror_available(url: str, timeout: float = 10) -> bool:
     """对镜像 URL 做快速 HEAD 探测，返回是否可达（非 404/403）。"""
     try:
@@ -62,16 +96,20 @@ def _check_mirror_available(url: str, timeout: float = 10) -> bool:
         return False
 
 
-async def _try_install_with_mirror(mirror: str | None) -> bool:
+async def _try_install_with_mirror(mirror: str | None, target_dir: str = "") -> bool:
     """使用指定镜像安装 Chromium，返回是否成功。
 
     若 mirror 为 None 则不设 PLAYWRIGHT_DOWNLOAD_HOST，使用官方默认源。
+    若 target_dir 指定，则设置 PLAYWRIGHT_BROWSERS_PATH 将浏览器安装到该目录。
     """
     env = dict(os.environ)
     label = mirror or "官方源"
     _log.info(f"[Chromium 安装] 正在尝试: {label}")
     if mirror:
         env["PLAYWRIGHT_DOWNLOAD_HOST"] = mirror
+    if target_dir:
+        env["PLAYWRIGHT_BROWSERS_PATH"] = target_dir
+        _log.info(f"[Chromium 安装] 目标目录: {target_dir}")
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -223,16 +261,20 @@ async def _force_clear_apt_lock() -> bool:
 
 
 async def _install_chromium_async() -> None:
-    """异步后台任务：按优先级依次尝试各镜像下载 Chromium + 系统依赖。
+    """异步后台任务：将 Chromium 安装到插件自身 data/playwright 目录。
 
-    通过 asyncio.create_subprocess_exec 实现真正的异步 I/O，
-    下载期间不阻塞事件循环。
+    按优先级依次尝试各镜像下载，下载期间不阻塞事件循环。
+    安装目标为插件 data/playwright/ 目录，重启后自动复用。
     """
     global _install_done, _install_error
 
     _log.info("[Chromium 后台安装] 开始探测可用镜像...")
 
-    # 1. 按优先级遍历镜像安装 Chromium 浏览器二进制
+    # 确保目标目录存在
+    _PLUGIN_PLAYWRIGHT_DIR.mkdir(parents=True, exist_ok=True)
+    target_dir = str(_PLUGIN_PLAYWRIGHT_DIR.resolve())
+
+    # 1. 按优先级遍历镜像安装 Chromium 浏览器二进制到插件 data 目录
     installed = False
     for mirror in _MIRRORS:
         label = mirror or "官方源"
@@ -241,7 +283,7 @@ async def _install_chromium_async() -> None:
             _log.warning(f"[Chromium 后台安装] 跳过不可达镜像: {label}")
             continue
 
-        if await _try_install_with_mirror(mirror):
+        if await _try_install_with_mirror(mirror, target_dir=target_dir):
             installed = True
             break
 
@@ -277,45 +319,42 @@ async def _get_browser(cache_path: str = ""):
     # 从缓存目录中查找 Chromium 可执行文件路径
     _executable_path: str | None = None
 
+    # 1) 优先检查用户配置的外部缓存路径
     if cache_path and not _install_done and not _install_error:
         _log.info(f"[浏览器] 检测到外部缓存路径: {cache_path}")
-        cache_dir = Path(cache_path)
-        if cache_dir.is_dir():
-            # 查找 chrome-headless-shell 或 chrome 可执行文件
-            headless_candidates = sorted(
-                cache_dir.glob("**/chrome-headless-shell-linux64/chrome-headless-shell"),
-                reverse=True,
-            )
-            chrome_candidates = sorted(
-                cache_dir.glob("**/chrome-linux64/chrome"),
-                reverse=True,
-            )
-            candidates = headless_candidates + chrome_candidates
-            if candidates:
-                _executable_path = str(candidates[0])
-                _log.info(f"[浏览器] 使用缓存浏览器: {_executable_path}")
-                os.chmod(_executable_path, 0o755)
-
-                # 缓存命中后仍需安装系统级依赖（libglib-2.0.so.0 等）
-                _log.info("[浏览器] 缓存命中，安装 Chromium 系统依赖...")
-                deps_ok = await _install_system_deps()
-                if deps_ok:
-                    _log.info("[浏览器] 系统依赖安装完成")
-                else:
-                    _log.warning("[浏览器] 系统依赖安装失败，但仍将尝试启动浏览器（依赖可能已预装）")
-
-                _install_done = True
-            else:
-                _log.warning(
-                    "[浏览器] 缓存目录中未找到 Chromium 可执行文件，请确认目录包含 "
-                    "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"
-                )
+        _executable_path = _find_chromium_executable(cache_path)
+        if _executable_path:
+            _log.info(f"[浏览器] 外部缓存命中: {_executable_path}")
         else:
-            _log.warning(f"[浏览器] 外部缓存路径不存在或不是目录: {cache_path}，回退到在线下载")
+            _log.warning(
+                "[浏览器] 外部缓存目录中未找到 Chromium 可执行文件，"
+                "将尝试插件 data 目录和默认缓存目录"
+            )
 
-    # 仅在缓存未命中时启动后台安装
+    # 2) 检查插件自身 data/playwright 目录（上次在线安装的结果）
+    if not _executable_path and not _install_done and not _install_error:
+        _executable_path = _find_chromium_executable(_PLUGIN_PLAYWRIGHT_DIR)
+        if _executable_path:
+            _log.info(f"[浏览器] 插件 data 目录缓存命中: {_executable_path}")
+        else:
+            _log.debug(f"[浏览器] 插件 data 目录无缓存: {_PLUGIN_PLAYWRIGHT_DIR}")
+
+    # 3) 未命中时检查 Playwright 默认缓存目录
+    if not _executable_path and not _install_done and not _install_error:
+        for cache_dir in _get_default_playwright_cache_dirs():
+            _executable_path = _find_chromium_executable(cache_dir)
+            if _executable_path:
+                _log.info(f"[浏览器] 默认缓存命中: {_executable_path}")
+                break
+
+    # 4) 缓存命中后，标记安装完成（跳过在线下载）
+    if _executable_path and not _install_done and not _install_error:
+        _install_done = True
+        _log.info("[浏览器] Chromium 已在缓存中就绪，跳过在线下载")
+
+    # 5) 缓存未命中，触发后台在线安装（下载到插件 data/playwright）
     if not _install_done and _install_task is None:
-        _log.info("[浏览器] 触发后台 Chromium 安装任务...")
+        _log.info("[浏览器] 未找到缓存 Chromium，触发后台在线安装...")
         _install_task = asyncio.create_task(_install_chromium_async())
 
     if _install_error:
@@ -468,10 +507,6 @@ class ImageRenderer:
         is_pct_key = any(
             kw in kl for kw in ("成功率", "命中率", "rate", "success")
         )
-        is_count_key = any(
-            kw in kl
-            for kw in ("total", "active", "请求", "消息", "token", "tokens", "总数", "count")
-        )
 
         # bool → 圆点
         if isinstance(value, bool):
@@ -499,8 +534,7 @@ class ImageRenderer:
         # int → 千分位格式化
         if isinstance(value, int):
             formatted = f"{value:,}" if value >= 1000 else str(value)
-            css = "num" if is_count_key else "str"
-            return formatted, css
+            return formatted, "num"
 
         # float → 两位小数
         if isinstance(value, float):

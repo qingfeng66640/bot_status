@@ -21,6 +21,10 @@
 | `warning_color` | `str` | `"#ff9100"` | 中等成功率 (70% ~ 90%) 进度条、警告指示灯的填充色。 |
 | `danger_color` | `str` | `"#ff1744"` | 低成功率 (<70%) 进度条、异常离线状态的填充色。 |
 | `border_radius` | `str` | `"4px"` | 卡片和机架的圆角大小，例如 `"4px"`, `"0px"` 或 `"8px"`。 |
+| `text_color` | `str` | `"#e2e8f0"` | 卡片标题文字颜色，用于各卡片模块标题如 "// 适配器" (如 `"#e2e8f0"`)。 |
+| `label_color` | `str` | `"#718096"` | 标签文字颜色，用于数据行左侧的字段名及 SYS_TIME 区域 (如 `"#718096"`)。 |
+| `metric_color` | `str` | `"#ff9100"` | 数据行值的颜色，用于所有数据行右侧的值（数值、字符串、列表、百分比数字等）(如 `"#ff9100"`)。 |
+| `title_color` | `str` | `"#e2e8f0"` | 标题文字颜色，用于 header-title 主标题 (如 `"#e2e8f0"`)。 |
 | `custom_html_path` | `str` | `""` | **自定义 HTML 模板文件的绝对路径**。例如 `"C:/mofox/my_status.html"`。若留空或不配置，将默认加载插件内置的工业控制台模板。 |
 | `chromium_cache_path` | `str` | `""` | **预下载的 Playwright Chromium 浏览器缓存目录的绝对路径**。例如 `"/data/ms-playwright"`。若配置且目录下已有可用浏览器，直接使用跳过在线下载。**离线部署方法**：先在能上网的机器执行 `playwright install chromium`，然后将 `~/.cache/ms-playwright/` 目录打包拷贝到容器内，通过 docker volume 挂载并配置此路径。 |
 
@@ -43,6 +47,10 @@
     --warning-color: {{ style.warning_color | default('#ff9100') }};
     --danger-color: {{ style.danger_color | default('#ff1744') }};
     --border-radius: {{ style.border_radius | default('4px') }};
+    --text-color: {{ style.text_color | default('#e2e8f0') }};
+    --label-color: {{ style.label_color | default('#718096') }};
+    --metric-color: {{ style.metric_color | default('#ff9100') }};
+    --title-color: {{ style.title_color | default('#e2e8f0') }};
   }
   ```
 
