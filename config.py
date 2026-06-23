@@ -18,6 +18,10 @@ class BotStatusConfig(BaseConfig):
         """插件开关。"""
 
         enabled: bool = Field(default=True, description="是否启用插件")
+        permission_level: str = Field(
+            default="operator",
+            description="命令所需的最低权限级别 (owner/operator/user/guest)，默认为 operator",
+        )
 
     @config_section("runtime")
     class RuntimeSection(SectionBase):

@@ -1,6 +1,9 @@
 ## 更新内容
 
 ### 新功能
+- 新增 `permission_level` 配置项，支持自定义命令最低权限级别（owner/operator/user/guest）
+  - 默认 `"operator"`，设为 `"user"` 即可让普通用户也使用 `/status` 系列命令
+  - 配置路径：`[plugin]` > `permission_level`
 - 新增 `text_color`、`label_color`、`metric_color`、`title_color` 四种字体颜色自定义配置
   - `text_color`: 卡片标题颜色
   - `label_color`: 标签文字颜色
