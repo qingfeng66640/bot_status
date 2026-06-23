@@ -1,22 +1,27 @@
 """Bot 状态图片渲染工具。
 
 使用 Jinja2 模板 + Playwright 无头浏览器将状态数据渲染为高清 PNG 图片。
-模块导入时自动启动后台线程下载 Chromium，首次 /status 请求不需等待。
+模块导入后首次 /status 请求会自动触发异步后台下载 Chromium，不阻塞事件循环。
+下载镜像按优先级依次尝试：npmmirror → 腾讯云 → 华为云 → Yandex → 官方。
 """
 
 from __future__ import annotations
 
 import asyncio
 import base64
-import subprocess
+import os
 import sys
-import threading
+import urllib.request
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import jinja2
 from playwright.async_api import async_playwright
+
+from src.app.plugin_system.api.log_api import get_logger
+
+_log = get_logger("bot_status.image")
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
 
@@ -25,87 +30,315 @@ _pw: Any = None
 _browser: Any = None
 _lock = asyncio.Lock()
 
-# 后台安装状态
-_install_state = {"done": False, "error": None, "started": False}
-_install_lock = threading.Lock()
+# 后台安装状态（纯 asyncio，无需线程锁）
+_install_task: asyncio.Task | None = None
+_install_done = False
+_install_error: str | None = None
+
+# 按优先级排列的镜像列表，最后一个为 None（使用官方源）
+_MIRRORS = [
+    "https://npmmirror.com/mirrors/playwright",
+    "https://mirrors.cloud.tencent.com/playwright",
+    "https://mirrors.huaweicloud.com/playwright",
+    "https://http.mirror.yandex.ru/mirrors/playwright.azureedge.net",
+    None,  # 兜底：官方源
+]
 
 
 class BrowserNotAvailableError(Exception):
     """Playwright Chromium 浏览器未就绪（仍在后台下载中或安装失败）。"""
 
 
-def _install_chromium_background() -> None:
-    """后台线程：下载 Chromium 浏览器 + 系统依赖，不阻塞主流程。"""
-    global _install_state
-
-    with _install_lock:
-        if _install_state["started"]:
-            return
-        _install_state["started"] = True
-
-    # 1. 安装 Chromium 浏览器二进制
+def _check_mirror_available(url: str, timeout: float = 10) -> bool:
+    """对镜像 URL 做快速 HEAD 探测，返回是否可达（非 404/403）。"""
     try:
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            check=True,
-        )
-    except subprocess.CalledProcessError as e:
-        with _install_lock:
-            _install_state["error"] = f"Chromium 下载失败: {e.stderr or e}"
-        return
+        req = urllib.request.Request(url, method="HEAD")
+        resp = urllib.request.urlopen(req, timeout=timeout)
+        ok = resp.status < 400
+        _log.info(f"[镜像探测] {url} → HTTP {resp.status} {'✓ 可用' if ok else '✗ 不可用'}")
+        return ok
+    except Exception as e:
+        _log.warning(f"[镜像探测] {url} → 不可达 ({e})")
+        return False
 
-    # 2. 安装系统级依赖
+
+async def _try_install_with_mirror(mirror: str | None) -> bool:
+    """使用指定镜像安装 Chromium，返回是否成功。
+
+    若 mirror 为 None 则不设 PLAYWRIGHT_DOWNLOAD_HOST，使用官方默认源。
+    """
+    env = dict(os.environ)
+    label = mirror or "官方源"
+    _log.info(f"[Chromium 安装] 正在尝试: {label}")
+    if mirror:
+        env["PLAYWRIGHT_DOWNLOAD_HOST"] = mirror
+
     try:
-        subprocess.run(
-            [sys.executable, "-m", "playwright", "install-deps", "chromium"],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=True,
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "playwright", "install", "chromium",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=env,
         )
-    except subprocess.CalledProcessError:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=600)
+        if proc.returncode != 0:
+            err_text = stderr.decode() if stderr else f"exit code {proc.returncode}"
+            _log.warning(f"[Chromium 安装] {label} 失败: {err_text.strip()}")
+            return False
+        _log.info(f"[Chromium 安装] {label} 安装成功")
+        return True
+    except asyncio.TimeoutError:
+        _log.warning(f"[Chromium 安装] {label} 超时 (600s)")
+        return False
+    except Exception as e:
+        _log.warning(f"[Chromium 安装] {label} 异常: {e}")
+        return False
+
+
+async def _install_system_deps(max_retries: int = 5, retry_delay: float = 10) -> bool:
+    """安装 Chromium 系统级依赖（libglib-2.0.so.0 等）。
+
+    apt 锁可能被 Docker 容器启动时的 apt-get update 等进程占用，
+    先等待重试；若锁持续不释放，则主动杀掉持有进程并清理锁文件后重试。
+    """
+    for attempt in range(1, max_retries + 1):
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", "playwright", "install-deps", "chromium",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=300)
+            if proc.returncode == 0:
+                _log.info(f"[系统依赖] 安装成功 (attempt {attempt})")
+                return True
+            err_text = (stderr.decode(errors="replace") if stderr else "") + (
+                stdout.decode(errors="replace") if stdout else ""
+            )
+            if "Could not get lock" in err_text or "Unable to lock" in err_text:
+                if attempt < max_retries:
+                    _log.warning(
+                        f"[系统依赖] apt 锁被占用，{retry_delay}s 后重试 "
+                        f"({attempt}/{max_retries})"
+                    )
+                    await asyncio.sleep(retry_delay)
+                    continue
+                # 最后一次重试也遇到锁 → 主动清理后立即重试
+                _log.warning(
+                    f"[系统依赖] apt 锁持续被占用 ({max_retries} 次重试均失败)，"
+                    "尝试强制清理锁..."
+                )
+                if await _force_clear_apt_lock():
+                    _log.info("[系统依赖] 锁已清理，立即重试安装...")
+                    # 直接在循环内再试一次（不走 continue，避免 range 耗尽）
+                    try:
+                        proc = await asyncio.create_subprocess_exec(
+                            sys.executable, "-m", "playwright", "install-deps", "chromium",
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                        )
+                        stdout, stderr = await asyncio.wait_for(
+                            proc.communicate(), timeout=300
+                        )
+                        if proc.returncode == 0:
+                            _log.info("[系统依赖] 强制清理后安装成功")
+                            return True
+                        err2 = (
+                            stderr.decode(errors="replace") if stderr else ""
+                        )
+                        _log.warning(
+                            f"[系统依赖] 强制清理后安装仍失败: "
+                            f"{err2.strip()[:300]}"
+                        )
+                    except Exception as e:
+                        _log.warning(f"[系统依赖] 强制清理后安装异常: {e}")
+            else:
+                _log.warning(
+                    f"[系统依赖] 安装返回非零 (attempt {attempt}/{max_retries}): "
+                    f"{err_text.strip()[:300]}"
+                )
+        except asyncio.TimeoutError:
+            _log.warning(f"[系统依赖] 安装超时 (attempt {attempt}/{max_retries})")
+        except Exception as e:
+            _log.warning(f"[系统依赖] 安装异常 (attempt {attempt}/{max_retries}): {e}")
+        if attempt < max_retries:
+            await asyncio.sleep(retry_delay)
+    return False
+
+
+async def _force_clear_apt_lock() -> bool:
+    """强制清理 apt 锁：杀掉持有锁的进程并删除锁文件。"""
+    try:
+        # 1. 查出持有 apt 锁的进程 PID 并杀掉
+        proc = await asyncio.create_subprocess_exec(
+            "fuser", "-k", "/var/lib/apt/lists/lock",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+        _log.info("[系统依赖] 已杀掉持有 /var/lib/apt/lists/lock 的进程")
+    except Exception:
         pass
 
-    with _install_lock:
-        _install_state["done"] = True
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "fuser", "-k", "/var/lib/dpkg/lock-frontend",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=10)
+        _log.info("[系统依赖] 已杀掉持有 /var/lib/dpkg/lock-frontend 的进程")
+    except Exception:
+        pass
+
+    # 2. 清理残留锁文件
+    lock_files = [
+        "/var/lib/apt/lists/lock",
+        "/var/lib/dpkg/lock-frontend",
+        "/var/lib/dpkg/lock",
+        "/var/cache/apt/archives/lock",
+    ]
+    for lock_file in lock_files:
+        try:
+            os.remove(lock_file)
+            _log.info(f"[系统依赖] 已删除锁文件: {lock_file}")
+        except FileNotFoundError:
+            pass
+        except Exception as e:
+            _log.warning(f"[系统依赖] 删除锁文件失败 ({lock_file}): {e}")
+
+    # 3. 修复可能中断的 dpkg 状态
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "dpkg", "--configure", "-a",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        await asyncio.wait_for(proc.communicate(), timeout=60)
+        _log.info("[系统依赖] dpkg --configure -a 完成")
+    except Exception:
+        pass
+
+    return True
 
 
-def _get_install_status() -> dict:
-    """获取当前 Chromium 安装状态（线程安全）。"""
-    with _install_lock:
-        return dict(_install_state)
+async def _install_chromium_async() -> None:
+    """异步后台任务：按优先级依次尝试各镜像下载 Chromium + 系统依赖。
+
+    通过 asyncio.create_subprocess_exec 实现真正的异步 I/O，
+    下载期间不阻塞事件循环。
+    """
+    global _install_done, _install_error
+
+    _log.info("[Chromium 后台安装] 开始探测可用镜像...")
+
+    # 1. 按优先级遍历镜像安装 Chromium 浏览器二进制
+    installed = False
+    for mirror in _MIRRORS:
+        label = mirror or "官方源"
+        # 先快速探测镜像是否可访问（官方源跳过探测）
+        if mirror is not None and not _check_mirror_available(mirror):
+            _log.warning(f"[Chromium 后台安装] 跳过不可达镜像: {label}")
+            continue
+
+        if await _try_install_with_mirror(mirror):
+            installed = True
+            break
+
+    if not installed:
+        _install_error = "所有镜像均无法下载 Chromium（官方源也已尝试）"
+        _log.error(f"[Chromium 后台安装] {_install_error}")
+        return
+
+    _log.info("[Chromium 后台安装] Chromium 安装完成，正在检查系统依赖...")
+
+    # 2. 安装系统级依赖（带 apt 锁重试）
+    deps_ok = await _install_system_deps()
+    if deps_ok:
+        _log.info("[Chromium 后台安装] 系统依赖安装完成")
+    else:
+        _log.warning("[Chromium 后台安装] 系统依赖安装失败，可能非 root 或 apt 锁持续占用")
+
+    _install_done = True
+    _log.info("[Chromium 后台安装] 全部就绪，浏览器可用")
 
 
-# 模块导入时立即启动后台下载（非阻塞）
-_bg_thread = threading.Thread(target=_install_chromium_background, daemon=True, name="pwt-install")
-_bg_thread.start()
-
-
-async def _get_browser():
+async def _get_browser(cache_path: str = ""):
     """获取全局复用的异步浏览器实例（线程安全）。
 
-    如果 Chromium 仍在后台下载中，抛出 BrowserNotAvailableError 并提示稍后重试。
+    首次调用时自动触发后台异步下载 Chromium，不阻塞事件循环。
+    如果 Chromium 仍在下载中，抛出 BrowserNotAvailableError 提示稍后重试。
+
+    Args:
+        cache_path: 可选的外部浏览器缓存路径。如果指定且目录下已有可用浏览器，直接使用跳过下载。
     """
-    global _pw, _browser
+    global _pw, _browser, _install_task, _install_done
 
-    status = _get_install_status()
-    if status["error"]:
-        raise BrowserNotAvailableError(f"Chromium 安装失败: {status['error']}")
-    if not status["done"]:
-        raise BrowserNotAvailableError("Chromium 浏览器正在后台下载中，请稍后重试。首次下载约需 2-5 分钟。")
+    # 从缓存目录中查找 Chromium 可执行文件路径
+    _executable_path: str | None = None
 
+    if cache_path and not _install_done and not _install_error:
+        _log.info(f"[浏览器] 检测到外部缓存路径: {cache_path}")
+        cache_dir = Path(cache_path)
+        if cache_dir.is_dir():
+            # 查找 chrome-headless-shell 或 chrome 可执行文件
+            headless_candidates = sorted(
+                cache_dir.glob("**/chrome-headless-shell-linux64/chrome-headless-shell"),
+                reverse=True,
+            )
+            chrome_candidates = sorted(
+                cache_dir.glob("**/chrome-linux64/chrome"),
+                reverse=True,
+            )
+            candidates = headless_candidates + chrome_candidates
+            if candidates:
+                _executable_path = str(candidates[0])
+                _log.info(f"[浏览器] 使用缓存浏览器: {_executable_path}")
+                os.chmod(_executable_path, 0o755)
+
+                # 缓存命中后仍需安装系统级依赖（libglib-2.0.so.0 等）
+                _log.info("[浏览器] 缓存命中，安装 Chromium 系统依赖...")
+                deps_ok = await _install_system_deps()
+                if deps_ok:
+                    _log.info("[浏览器] 系统依赖安装完成")
+                else:
+                    _log.warning("[浏览器] 系统依赖安装失败，但仍将尝试启动浏览器（依赖可能已预装）")
+
+                _install_done = True
+            else:
+                _log.warning(
+                    "[浏览器] 缓存目录中未找到 Chromium 可执行文件，请确认目录包含 "
+                    "chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell"
+                )
+        else:
+            _log.warning(f"[浏览器] 外部缓存路径不存在或不是目录: {cache_path}，回退到在线下载")
+
+    # 仅在缓存未命中时启动后台安装
+    if not _install_done and _install_task is None:
+        _log.info("[浏览器] 触发后台 Chromium 安装任务...")
+        _install_task = asyncio.create_task(_install_chromium_async())
+
+    if _install_error:
+        raise BrowserNotAvailableError(f"Chromium 安装失败: {_install_error}")
+    if not _install_done:
+        raise BrowserNotAvailableError(
+            "Chromium 浏览器正在后台异步下载中，请稍后重试。首次下载约需 2-5 分钟。"
+        )
+
+    _log.info("[浏览器] Chromium 已就绪，正在启动浏览器实例...")
     if _browser is None:
         async with _lock:
             if _browser is None:
+                launch_kwargs: dict = {
+                    "headless": True,
+                    "args": ["--disable-gpu", "--no-sandbox", "--disable-setuid-sandbox"],
+                }
+                if _executable_path:
+                    launch_kwargs["executable_path"] = _executable_path
                 try:
                     _pw = await async_playwright().start()
-                    _browser = await _pw.chromium.launch(
-                        headless=True,
-                        args=["--disable-gpu", "--no-sandbox", "--disable-setuid-sandbox"],
-                    )
+                    _browser = await _pw.chromium.launch(**launch_kwargs)
+                    _log.info("[浏览器] 浏览器实例启动成功")
                 except Exception as e:
                     msg = str(e)
                     if "Executable doesn't exist" in msg:
@@ -162,6 +395,7 @@ class ImageRenderer:
         sections: list[dict[str, Any]],
         style: dict[str, str] | None = None,
         custom_template_path: str = "",
+        chromium_cache_path: str = "",
     ) -> str:
         """渲染状态数据为 base64 PNG。
 
@@ -169,6 +403,7 @@ class ImageRenderer:
         value 可以是 str / int / float / bool / list。
         style 支持传入自定义颜色和圆角配置字典。
         custom_template_path 支持指定外部 HTML 模板文件的绝对路径。
+        chromium_cache_path 支持指定预下载的外部 Chromium 缓存目录，跳过在线下载。
         """
         processed = self._process_sections(sections)
 
@@ -192,7 +427,7 @@ class ImageRenderer:
             style=style or {},
         )
 
-        browser = await _get_browser()
+        browser = await _get_browser(cache_path=chromium_cache_path)
         page = await browser.new_page(
             viewport={"width": self.WIDTH, "height": 500},
             device_scale_factor=self.DEVICE_SCALE,

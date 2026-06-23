@@ -91,6 +91,12 @@ class BotStatusConfig(BaseConfig):
             default="",
             description="自定义 HTML 模板文件绝对路径，留空则使用默认模板"
         )
+        chromium_cache_path: str = Field(
+            default="",
+            description="Playwright Chromium 浏览器缓存的绝对路径。若指定且已有可用浏览器，跳过在线下载。"
+            " 外部预下载后挂载：先在有网络的机器上执行 playwright install chromium，"
+            " 然后将 ~/.cache/ms-playwright/ 打包拷贝到容器内，并配置此路径指向该目录。"
+        )
 
     plugin: PluginSection = Field(default_factory=PluginSection)
     runtime: RuntimeSection = Field(default_factory=RuntimeSection)

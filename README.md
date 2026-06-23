@@ -22,6 +22,7 @@
 | `danger_color` | `str` | `"#ff1744"` | 低成功率 (<70%) 进度条、异常离线状态的填充色。 |
 | `border_radius` | `str` | `"4px"` | 卡片和机架的圆角大小，例如 `"4px"`, `"0px"` 或 `"8px"`。 |
 | `custom_html_path` | `str` | `""` | **自定义 HTML 模板文件的绝对路径**。例如 `"C:/mofox/my_status.html"`。若留空或不配置，将默认加载插件内置的工业控制台模板。 |
+| `chromium_cache_path` | `str` | `""` | **预下载的 Playwright Chromium 浏览器缓存目录的绝对路径**。例如 `"/data/ms-playwright"`。若配置且目录下已有可用浏览器，直接使用跳过在线下载。**离线部署方法**：先在能上网的机器执行 `playwright install chromium`，然后将 `~/.cache/ms-playwright/` 目录打包拷贝到容器内，通过 docker volume 挂载并配置此路径。 |
 
 ---
 

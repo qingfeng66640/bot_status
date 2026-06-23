@@ -73,6 +73,7 @@ class StatusCommand(BaseCommand):
             # 获取用户配置的 style
             style_dict = {}
             custom_html_path = ""
+            chromium_cache_path = ""
             cfg = self._cfg
             if cfg is not None and getattr(cfg, "style", None) is not None:
                 style_dict = {
@@ -85,8 +86,10 @@ class StatusCommand(BaseCommand):
                     "border_radius": cfg.style.border_radius,
                 }
                 custom_html_path = getattr(cfg.style, "custom_html_path", "")
+                chromium_cache_path = getattr(cfg.style, "chromium_cache_path", "")
             image_base64 = await renderer.render_to_base64(
-                title, sections, style=style_dict, custom_template_path=custom_html_path
+                title, sections, style=style_dict, custom_template_path=custom_html_path,
+                chromium_cache_path=chromium_cache_path,
             )
             success = await send_image(image_base64, stream_id=self.stream_id)
             return (True, "ok") if success else (False, "send_failed")
@@ -245,10 +248,6 @@ class StatusCommand(BaseCommand):
         h_arg = hours if hours > 0 else None
         biz_h = self._resolve_hours(h_arg, "all")
         llm_h = self._resolve_hours(h_arg, "all")
-        # 如果显式传入小时，同时应用到业务 and LLM
-        if hours > 0 and h_arg is None:
-            biz_h = h_arg
-            llm_h = h_arg
 
         mgr = get_status_manager()
         d = await mgr.get_all_status(business_hours=biz_h, llm_hours=llm_h)
