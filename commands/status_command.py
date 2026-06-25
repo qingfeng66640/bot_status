@@ -11,6 +11,8 @@
 """
 from __future__ import annotations
 
+import asyncio
+
 from src.app.plugin_system.api.log_api import get_logger
 from src.app.plugin_system.api.send_api import send_image
 from src.app.plugin_system.base import BaseCommand, cmd_route
@@ -68,41 +70,59 @@ class StatusCommand(BaseCommand):
     # ------------------------------------------------------------------
 
     async def _render_and_send(self, title: str, sections: list[dict]) -> tuple[bool, str]:
-        try:
-            renderer = ImageRenderer()
-            # 获取用户配置的 style
-            style_dict = {}
-            custom_html_path = ""
-            chromium_cache_path = ""
-            cfg = self._cfg
-            if cfg is not None and getattr(cfg, "style", None) is not None:
-                style_dict = {
-                    "bg_color": cfg.style.bg_color,
-                    "border_color": cfg.style.border_color,
-                    "accent_color": cfg.style.accent_color,
-                    "success_color": cfg.style.success_color,
-                    "warning_color": cfg.style.warning_color,
-                    "danger_color": cfg.style.danger_color,
-                    "border_radius": cfg.style.border_radius,
-                    "text_color": getattr(cfg.style, "text_color", "#e2e8f0"),
-                    "label_color": getattr(cfg.style, "label_color", "#718096"),
-                    "metric_color": getattr(cfg.style, "metric_color", "#ff9100"),
-                    "title_color": getattr(cfg.style, "title_color", "#e2e8f0"),
-                }
-                custom_html_path = getattr(cfg.style, "custom_html_path", "")
-                chromium_cache_path = getattr(cfg.style, "chromium_cache_path", "")
-            image_base64 = await renderer.render_to_base64(
-                title, sections, style=style_dict, custom_template_path=custom_html_path,
-                chromium_cache_path=chromium_cache_path,
-            )
-            success = await send_image(image_base64, stream_id=self.stream_id)
-            return (True, "ok") if success else (False, "send_failed")
-        except BrowserNotAvailableError as e:
-            logger.warning(f"Chromium 浏览器未就绪: {e}")
-            return False, str(e)
-        except Exception as e:
-            logger.error(f"渲染或发送状态图片失败: {e}", exc_info=True)
-            return False, str(e)
+        """异步渲染并发送图片。
+
+        将耗时渲染操作包装为后台任务，立即返回，避免触发事件系统的
+        EVENT_HANDLER_TIMEOUT_SECONDS (5s) 超时被杀。
+        """
+        async def _do_render_and_send():
+            try:
+                renderer = ImageRenderer()
+                style_dict = {}
+                custom_html_path = ""
+                chromium_cache_path = ""
+                cfg = self._cfg
+                if cfg is not None and getattr(cfg, "style", None) is not None:
+                    style_dict = {
+                        "bg_color": cfg.style.bg_color,
+                        "border_color": cfg.style.border_color,
+                        "accent_color": cfg.style.accent_color,
+                        "success_color": cfg.style.success_color,
+                        "warning_color": cfg.style.warning_color,
+                        "danger_color": cfg.style.danger_color,
+                        "border_radius": cfg.style.border_radius,
+                        "text_color": getattr(cfg.style, "text_color", "#e2e8f0"),
+                        "label_color": getattr(cfg.style, "label_color", "#718096"),
+                        "metric_color": getattr(cfg.style, "metric_color", "#ff9100"),
+                        "title_color": getattr(cfg.style, "title_color", "#e2e8f0"),
+                        "chart_line_1": getattr(cfg.style, "chart_line_1", "#ff9100"),
+                        "chart_line_2": getattr(cfg.style, "chart_line_2", "#00ff66"),
+                        "chart_axis_x": getattr(cfg.style, "chart_axis_x_color", "#718096"),
+                        "chart_axis_y": getattr(cfg.style, "chart_axis_y_color", "#718096"),
+                        "chart_axis_y_right": getattr(cfg.style, "chart_axis_y_right_color", "#718096"),
+                    }
+                    custom_html_path = getattr(cfg.style, "custom_html_path", "")
+                    chromium_cache_path = getattr(cfg.style, "chromium_cache_path", "")
+                    custom_frontend_enabled = getattr(cfg.style, "custom_frontend_enabled", False)
+                    custom_css_path = getattr(cfg.style, "custom_css_path", "") if custom_frontend_enabled else ""
+                    custom_js_path = getattr(cfg.style, "custom_js_path", "") if custom_frontend_enabled else ""
+                    static_resources_dir = getattr(cfg.style, "static_resources_dir", "") if custom_frontend_enabled else ""
+                image_base64 = await renderer.render_to_base64(
+                    title, sections, style=style_dict, custom_template_path=custom_html_path,
+                    chromium_cache_path=chromium_cache_path,
+                    custom_css_path=custom_css_path,
+                    custom_js_path=custom_js_path,
+                    static_resources_dir=static_resources_dir,
+                    custom_frontend_enabled=custom_frontend_enabled,
+                )
+                await send_image(image_base64, stream_id=self.stream_id)
+            except BrowserNotAvailableError as e:
+                logger.warning(f"Chromium 浏览器未就绪: {e}")
+            except Exception as e:
+                logger.error(f"渲染或发送状态图片失败: {e}", exc_info=True)
+
+        asyncio.create_task(_do_render_and_send())
+        return True, "ok"
 
     # ------------------------------------------------------------------
     # 运行时
@@ -209,6 +229,25 @@ class StatusCommand(BaseCommand):
                 ],
             },
         ]
+
+        # 如果开启了趋势图，添加消息趋势图
+        cfg = self._cfg
+        if cfg and getattr(cfg.chart, "enabled", True):
+            chart_hours = getattr(cfg.chart, "hours", 24)
+            trends = await mgr.get_hourly_trends(hours=chart_hours)
+            sections.append({
+                "title": f"消息趋势 (最近 {chart_hours}h)",
+                "type": "chart",
+                "chart_type": "area",
+                "data": {
+                    "labels": trends["labels"],
+                    "datasets": [
+                        {"label": "入站 (Inbound)", "data": trends["messages"]["inbound"]},
+                        {"label": "出站 (Outbound)", "data": trends["messages"]["outbound"]},
+                    ]
+                }
+            })
+
         return await self._render_and_send("Bot 业务数据", sections)
 
     @cmd_route("业务")
@@ -241,6 +280,25 @@ class StatusCommand(BaseCommand):
                 ],
             },
         ]
+
+        # 如果开启了趋势图，添加 LLM 趋势图
+        cfg = self._cfg
+        if cfg and getattr(cfg.chart, "enabled", True):
+            chart_hours = getattr(cfg.chart, "hours", 24)
+            trends = await mgr.get_hourly_trends(hours=chart_hours)
+            sections.append({
+                "title": f"LLM 趋势 (最近 {chart_hours}h)",
+                "type": "chart",
+                "chart_type": "llm_trend",
+                "data": {
+                    "labels": trends["labels"],
+                    "datasets": [
+                        {"label": "请求数 (Requests)", "data": trends["llm"]["requests"]},
+                        {"label": "Token 消耗 (Tokens)", "data": trends["llm"]["tokens"]},
+                    ]
+                }
+            })
+
         return await self._render_and_send("Bot LLM 运营指标", sections)
 
     # ------------------------------------------------------------------
@@ -328,7 +386,7 @@ class StatusCommand(BaseCommand):
             sections.append({
                 "title": f"LLM 趋势 (最近 {chart_hours}h)",
                 "type": "chart",
-                "chart_type": "area",
+                "chart_type": "llm_trend",
                 "data": {
                     "labels": trends["labels"],
                     "datasets": [

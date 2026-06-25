@@ -213,20 +213,20 @@ class StatusManager:
                 else:
                     msg_inbound[offset] += 1
 
-        # 3. 获取 LLM 趋势 (SQL Aggregation)
+        # 3. 获取 LLM 趋势 (Python Binning，使用已有的 list_requests_by_time_range)
         llm_collector = get_llm_stats_collector()
-        llm_stats = await llm_collector.get_hourly_stats(hours=hours)
+        all_llm = await llm_collector.list_requests_by_time_range(
+            start_ts, now, limit=100000, offset=0
+        )
         llm_requests = [0] * (hours + 1)
         llm_tokens = [0] * (hours + 1)
 
-        # llm_stats 返回的是有数据的点，需要映射到我们的 labels 偏移量上
-        for s in llm_stats:
-            # 找到最匹配的时间点
-            s_ts = s["timestamp"]
-            offset = int((s_ts - start_ts) // 3600)
+        for r in all_llm:
+            ts = float(r.get("timestamp", 0))
+            offset = int((ts - start_ts) // 3600)
             if 0 <= offset <= hours:
-                llm_requests[offset] = s["total_requests"]
-                llm_tokens[offset] = s["total_tokens"]
+                llm_requests[offset] += 1
+                llm_tokens[offset] += int(r.get("total_tokens", 0))
 
         return {
             "hours": hours,

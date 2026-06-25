@@ -124,11 +124,47 @@ class BotStatusConfig(BaseConfig):
             default="",
             description="自定义 HTML 模板文件绝对路径，留空则使用默认模板"
         )
+        custom_frontend_enabled: bool = Field(
+            default=False,
+            description="启用自定义前端资源注入。开启后，下方自定义 CSS/JS/静态资源路径才会生效"
+        )
+        custom_css_path: str = Field(
+            default="",
+            description="自定义 CSS 文件绝对路径，内容会被内联为 <style> 标签注入渲染 HTML"
+        )
+        custom_js_path: str = Field(
+            default="",
+            description="自定义 JavaScript 文件绝对路径，内容会被内联为 <script> 标签注入渲染 HTML"
+        )
+        static_resources_dir: str = Field(
+            default="",
+            description="静态资源目录绝对路径。目录下所有文件转为 data: URI，通过模板变量 static_resources 供模板引用"
+        )
         chromium_cache_path: str = Field(
             default="",
             description="Playwright Chromium 浏览器缓存的绝对路径。若指定且已有可用浏览器，跳过在线下载。"
             " 外部预下载后挂载：先在有网络的机器上执行 playwright install chromium，"
             " 然后将 ~/.cache/ms-playwright/ 打包拷贝到容器内，并配置此路径指向该目录。"
+        )
+        chart_line_1: str = Field(
+            default="#ff9100",
+            description="图表曲线颜色1（消息入站/LLM请求数），与 accent_color 配合使用"
+        )
+        chart_line_2: str = Field(
+            default="#00ff66",
+            description="图表曲线颜色2（消息出站/LLM Token），与 success_color 配合使用"
+        )
+        chart_axis_x_color: str = Field(
+            default="#718096",
+            description="图表 X 轴刻度文字颜色，默认为 label_color 同色 (如 #718096)"
+        )
+        chart_axis_y_color: str = Field(
+            default="#718096",
+            description="图表 Y 轴刻度文字颜色，默认为 label_color 同色 (如 #718096)"
+        )
+        chart_axis_y_right_color: str = Field(
+            default="#718096",
+            description="图表右 Y 轴（双轴模式，如出入站/LLM Token）刻度文字颜色，默认为 label_color 同色 (如 #718096)"
         )
 
     plugin: PluginSection = Field(default_factory=PluginSection)

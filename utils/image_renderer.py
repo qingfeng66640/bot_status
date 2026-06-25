@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import mimetypes
 import os
 import sys
 import urllib.request
@@ -24,9 +25,87 @@ from src.app.plugin_system.api.log_api import get_logger
 _log = get_logger("bot_status.image")
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "templates"
+_STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 # 插件自身 data 目录下的 Chromium 缓存路径
 _PLUGIN_PLAYWRIGHT_DIR = Path(__file__).resolve().parent.parent / "data" / "playwright"
+
+# 模块加载时预读取 Chart.js，避免每次渲染都读盘
+_CHART_JS_CACHE: str | None = None
+
+
+def _load_chart_js() -> str:
+    """加载本地打包的 Chart.js，若无则返回空字符串。"""
+    global _CHART_JS_CACHE
+    if _CHART_JS_CACHE is not None:
+        return _CHART_JS_CACHE
+    chart_js_path = _STATIC_DIR / "chart.umd.min.js"
+    if chart_js_path.is_file():
+        _log.info("使用本地打包的 Chart.js")
+        _CHART_JS_CACHE = chart_js_path.read_text(encoding="utf-8")
+    else:
+        _log.warning("本地 Chart.js 未找到，图表将无法渲染")
+        _CHART_JS_CACHE = ""
+    return _CHART_JS_CACHE
+
+
+def _build_data_uri(file_path: Path) -> str:
+    """读取文件并返回 data: URI 字符串。
+
+    根据文件扩展名自动推断 MIME 类型，内容统一 base64 编码。
+    """
+    mime_type, _ = mimetypes.guess_type(str(file_path))
+    if mime_type is None:
+        mime_type = "application/octet-stream"
+    encoded = base64.b64encode(file_path.read_bytes()).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def _load_custom_frontend_resources(
+    custom_css_path: str,
+    custom_js_path: str,
+    static_resources_dir: str,
+) -> dict[str, Any]:
+    """加载自定义前端资源，返回模板可用的字典。
+
+    Returns:
+        dict with keys:
+          - custom_css: CSS 文本或空字符串
+          - custom_js: JS 文本或空字符串
+          - static_resources: 文件名 -> data: URI 映射
+    """
+    result: dict[str, Any] = {
+        "custom_css": "",
+        "custom_js": "",
+        "static_resources": {},
+    }
+
+    if custom_css_path:
+        css_file = Path(custom_css_path)
+        if css_file.is_file():
+            result["custom_css"] = css_file.read_text(encoding="utf-8")
+        else:
+            _log.warning(f"自定义 CSS 文件不存在: {custom_css_path}")
+
+    if custom_js_path:
+        js_file = Path(custom_js_path)
+        if js_file.is_file():
+            result["custom_js"] = js_file.read_text(encoding="utf-8")
+        else:
+            _log.warning(f"自定义 JS 文件不存在: {custom_js_path}")
+
+    if static_resources_dir:
+        res_dir = Path(static_resources_dir)
+        if res_dir.is_dir():
+            for f in res_dir.iterdir():
+                if f.is_file():
+                    result["static_resources"][f.name] = _build_data_uri(f)
+            _log.info(f"已加载 {len(result['static_resources'])} 个静态资源")
+        else:
+            _log.warning(f"静态资源目录不存在: {static_resources_dir}")
+
+    return result
+
 
 # 全局浏览器实例（懒启动，复用）
 _pw: Any = None
@@ -435,6 +514,10 @@ class ImageRenderer:
         style: dict[str, str] | None = None,
         custom_template_path: str = "",
         chromium_cache_path: str = "",
+        custom_css_path: str = "",
+        custom_js_path: str = "",
+        static_resources_dir: str = "",
+        custom_frontend_enabled: bool = False,
     ) -> str:
         """渲染状态数据为 base64 PNG。
 
@@ -443,8 +526,11 @@ class ImageRenderer:
         style 支持传入自定义颜色和圆角配置字典。
         custom_template_path 支持指定外部 HTML 模板文件的绝对路径。
         chromium_cache_path 支持指定预下载的外部 Chromium 缓存目录，跳过在线下载。
+        custom_css_path / custom_js_path / static_resources_dir 支持自定义前端资源注入。
+        custom_frontend_enabled 控制是否启用自定义资源加载。
         """
         processed = self._process_sections(sections)
+        has_chart = any(s.get("type") == "chart" for s in processed)
 
         if custom_template_path:
             p = Path(custom_template_path)
@@ -459,11 +545,23 @@ class ImageRenderer:
         else:
             tmpl = self._env.get_template("status.html")
 
+        # 加载自定义前端资源（开关控制）
+        custom_resources: dict[str, Any] = {"custom_css": "", "custom_js": "", "static_resources": {}}
+        if custom_frontend_enabled:
+            custom_resources = _load_custom_frontend_resources(
+                custom_css_path, custom_js_path, static_resources_dir
+            )
+
         html = tmpl.render(
             title=title,
             timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             sections=processed,
             style=style or {},
+            has_chart=has_chart,
+            chart_js=_load_chart_js(),
+            custom_css=custom_resources["custom_css"],
+            custom_js=custom_resources["custom_js"],
+            static_resources=custom_resources["static_resources"],
         )
 
         browser = await _get_browser(cache_path=chromium_cache_path)
@@ -471,13 +569,20 @@ class ImageRenderer:
             viewport={"width": self.WIDTH, "height": 500},
             device_scale_factor=self.DEVICE_SCALE,
         )
-        await page.set_content(html, wait_until="networkidle")
+        await page.set_content(html, wait_until="domcontentloaded", timeout=30000)
 
         content_height = await page.evaluate("document.body.scrollHeight")
         await page.set_viewport_size(
             {"width": self.WIDTH, "height": max(content_height, 100)}
         )
-        await page.set_content(html, wait_until="networkidle")
+        await page.set_content(html, wait_until="domcontentloaded", timeout=30000)
+
+        # 等待图表绘制完成后再截图（无图表时 __chartsReady 始终为 true）
+        if has_chart:
+            try:
+                await page.wait_for_function("window.__chartsReady === true", timeout=10000)
+            except Exception:
+                _log.warning("等待图表渲染超时，继续截图")
 
         screenshot = await page.screenshot(full_page=True)
         await page.close()
