@@ -307,6 +307,37 @@ class StatusCommand(BaseCommand):
                 ],
             },
         ]
+
+        # 如果开启了趋势图，添加趋势图 Section
+        cfg = self._cfg
+        if cfg and getattr(cfg.chart, "enabled", True):
+            chart_hours = getattr(cfg.chart, "hours", 24)
+            trends = await mgr.get_hourly_trends(hours=chart_hours)
+            sections.append({
+                "title": f"消息趋势 (最近 {chart_hours}h)",
+                "type": "chart",
+                "chart_type": "area",
+                "data": {
+                    "labels": trends["labels"],
+                    "datasets": [
+                        {"label": "入站 (Inbound)", "data": trends["messages"]["inbound"]},
+                        {"label": "出站 (Outbound)", "data": trends["messages"]["outbound"]},
+                    ]
+                }
+            })
+            sections.append({
+                "title": f"LLM 趋势 (最近 {chart_hours}h)",
+                "type": "chart",
+                "chart_type": "area",
+                "data": {
+                    "labels": trends["labels"],
+                    "datasets": [
+                        {"label": "请求数 (Requests)", "data": trends["llm"]["requests"]},
+                        {"label": "Token 消耗 (Tokens)", "data": trends["llm"]["tokens"]},
+                    ]
+                }
+            })
+
         return await self._render_and_send("Bot 全部状态", sections)
 
     @cmd_route("全部")
@@ -327,7 +358,7 @@ class StatusCommand(BaseCommand):
             "2. /status runtime | 运行 - 展示实时组件与系统状态（不受时间窗口限制）\n"
             "3. /status business | 业务 [h] - 展示业务与消息指标，可选指定时间窗口\n"
             "4. /status llm [h] - 展示 LLM 运营与成本指标，可选指定时间窗口\n"
-            "5. /status all | 全部 [h] - 展示全部指标合集，可选指定时间窗口\n"
+            "5. /status all | 全部 [h] - 展示全部指标合集（含趋势图），可选指定时间窗口\n"
             "6. /status help | 帮助 - 查看本帮助菜单\n\n"
             "提示: 默认时间窗口可在配置文件中配置。"
         )

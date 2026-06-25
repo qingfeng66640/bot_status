@@ -59,6 +59,19 @@ class BotStatusConfig(BaseConfig):
             description="全部状态（/status all）默认时间窗口（小时），同时应用于业务和 LLM 数据",
         )
 
+    @config_section("chart")
+    class ChartSection(SectionBase):
+        """趋势图表配置。"""
+
+        enabled: bool = Field(
+            default=True,
+            description="是否在状态图片中显示趋势图表"
+        )
+        hours: int = Field(
+            default=24,
+            description="趋势图展示的时间跨度（小时），默认为 24 小时"
+        )
+
     @config_section("style")
     class StyleSection(SectionBase):
         """自定义界面样式（风格色盘）。"""
@@ -123,4 +136,5 @@ class BotStatusConfig(BaseConfig):
     business: BusinessSection = Field(default_factory=BusinessSection)
     llm: LLMSection = Field(default_factory=LLMSection)
     all: AllSection = Field(default_factory=AllSection)
+    chart: ChartSection = Field(default_factory=ChartSection)
     style: StyleSection = Field(default_factory=StyleSection)

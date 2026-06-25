@@ -145,6 +145,10 @@
     gap: 16px;
   }
 
+  .card.full-width {
+    grid-column: span 2;
+  }
+
   /* 当只有一个 Section 时占满整行 */
   .cards:has(> :last-child:first-child) {
     grid-template-columns: 1fr;
@@ -164,202 +168,30 @@
     display: flex;
     flex-direction: column;
     position: relative;
+    overflow: hidden;
   }
 
-  /* 模拟机电设备的固定螺丝扣 */
-  .card::before, .card::after {
-    content: "⊕";
-    position: absolute;
-    font-size: 10px;
-    color: #4a5568;
-    line-height: 1;
-  }
-  .card::before { top: 4px; left: 6px; }
-  .card::after { bottom: 4px; right: 6px; }
-
-  /* 模块顶部的硬边工业色彩标志，替换为工控警示色 */
-  .card-accent {
-    height: 3px;
-    width: 100%;
-    background-color: var(--accent-color); /* 默认使用高亮指示色 */
-  }
-  .card-accent.blue   { background-color: var(--accent-color); }
-  .card-accent.green  { background-color: var(--success-color); }
-  .card-accent.orange { background-color: var(--accent-color); }
-  .card-accent.purple { background-color: var(--accent-color); }
-  .card-accent.cyan   { background-color: var(--accent-color); }
-  .card-accent.red    { background-color: var(--danger-color); }
+  /* ... */
 
   .card-body {
     padding: 18px 20px;
     flex: 1;
     display: flex;
     flex-direction: column;
+    min-height: 0;
   }
 
-  .card-title {
-    font-size: 13px;
-    font-weight: 900;
-    color: var(--text-color);
-    margin-bottom: 12px;
-    padding-bottom: 6px;
-    border-bottom: 2px solid var(--border-color);
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    display: flex;
-    justify-content: space-between;
-  }
-  .card-title-prefix {
-    color: var(--accent-color);
+  /* 图表容器样式 */
+  .chart-container {
+    width: 100%;
+    height: 180px;
+    margin-top: 4px;
+    position: relative;
   }
 
-  .card-rows {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    flex: 1;
-  }
-
-  .row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 6px;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .row-key {
-    color: var(--label-color);
-    flex-shrink: 0;
-    font-weight: bold;
-    text-transform: uppercase;
-  }
-
-  .row-dots {
-    flex-grow: 1;
-    border-bottom: 1px dashed var(--border-color);
-    height: 1em;
-    margin: 0 6px;
-  }
-
-  .row-value {
-    color: var(--metric-color);
-    font-weight: bold;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-    /* 解决溢出：控制最大宽度并自动折行，保证长列表（如适配器签名）不超出边框 */
-    max-width: 180px;
-    word-break: break-all;
-    white-space: normal;
-  }
-
-  /* 适配器或者列表多的时候折行布局，且卡片中最后一行可以自适应宽度 */
-  .cards:has(> :last-child:first-child) .row-value,
-  .card:last-child:nth-child(odd) .row-value {
-    max-width: 400px;
-  }
-
-  /* 工业级对比度数值高亮 */
-  .row-value.num {
-    color: var(--metric-color); /* 动态配置参数指标色 */
-  }
-  .row-value.cost {
-    color: var(--metric-color);
-  }
-  .row-value.good {
-    color: var(--success-color); /* 荧光绿色 */
-  }
-  .row-value.bad {
-    color: var(--danger-color); /* 警示红色 */
-  }
-  .row-value.str {
-    color: var(--metric-color);
-  }
-
-  /* 矩形物理 LED 状态色块 */
-  .status-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 1px;
-    display: inline-block;
-    margin-right: 6px;
-    vertical-align: middle;
-    border: 1px solid rgba(0, 0, 0, 0.6);
-  }
-  .status-dot.ok {
-    background-color: var(--success-color);
-    box-shadow: 0 0 6px var(--success-color);
-  }
-  .status-dot.err {
-    background-color: var(--danger-color);
-    box-shadow: 0 0 6px var(--danger-color);
-  }
-
-  /* 工业防护式进度条系统，使用高对比度底轨 */
-  .bar-wrap {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-  }
-  .bar-track {
-    width: 100px;
-    height: 12px;
-    background-color: #171d26;
-    border: 2px solid var(--border-color);
-    padding: 1px;
-    overflow: hidden;
-    display: inline-block;
-    vertical-align: middle;
-    border-radius: calc(var(--border-radius) / 2);
-  }
-  .bar-fill {
-    height: 100%;
-    display: block;
-    /* 工业防滑警示斜纹 */
-    background-size: 14px 14px;
-    image-rendering: pixelated;
-    border-radius: calc(var(--border-radius) / 2);
-  }
-
-  .bar-fill.high  {
-    background-color: var(--success-color);
-    background-image: linear-gradient(
-      45deg,
-      rgba(0, 0, 0, 0.2) 25%,
-      transparent 25%,
-      transparent 50%,
-      rgba(0, 0, 0, 0.2) 50%,
-      rgba(0, 0, 0, 0.2) 75%,
-      transparent 75%,
-      transparent
-    );
-  }
-  .bar-fill.mid   {
-    background-color: var(--warning-color);
-    background-image: linear-gradient(
-      45deg,
-      rgba(0, 0, 0, 0.2) 25%,
-      transparent 25%,
-      transparent 50%,
-      rgba(0, 0, 0, 0.2) 50%,
-      rgba(0, 0, 0, 0.2) 75%,
-      transparent 75%,
-      transparent
-    );
-  }
-  .bar-fill.low   {
-    background-color: var(--danger-color);
-    background-image: linear-gradient(
-      45deg,
-      rgba(0, 0, 0, 0.2) 25%,
-      transparent 25%,
-      transparent 50%,
-      rgba(0, 0, 0, 0.2) 50%,
-      rgba(0, 0, 0, 0.2) 75%,
-      transparent 75%,
-      transparent
-    );
+  canvas {
+    width: 100% !important;
+    height: 100% !important;
   }
 
   .footer {
@@ -388,6 +220,20 @@
 
   <div class="cards">
     {% for s in sections %}
+    {% if s.type == "chart" %}
+    <div class="card full-width">
+      <div class="card-accent {{ s.accent }}"></div>
+      <div class="card-body">
+        <div class="card-title">
+          <span>// {{ s.title }}</span>
+          <span class="card-title-prefix">[TREND]</span>
+        </div>
+        <div class="chart-container">
+          <canvas id="chart-{{ loop.index }}"></canvas>
+        </div>
+      </div>
+    </div>
+    {% else %}
     <div class="card">
       <div class="card-accent {{ s.accent }}"></div>
       <div class="card-body">
@@ -406,11 +252,101 @@
         </div>
       </div>
     </div>
+    {% endif %}
     {% endfor %}
   </div>
 
   <div class="footer">NEO-MOFOX MONITORING UNIT // SYS_STATUS_OK // REV_2026.06</div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const sections = {{ sections | tojson | safe }};
+  const metricColor = getComputedStyle(document.documentElement).getPropertyValue('--metric-color').trim();
+  const accentColor = getComputedStyle(document.documentElement).getPropertyValue('--accent-color').trim();
+  const successColor = getComputedStyle(document.documentElement).getPropertyValue('--success-color').trim();
+  const labelColor = getComputedStyle(document.documentElement).getPropertyValue('--label-color').trim();
+  const borderColor = getComputedStyle(document.documentElement).getPropertyValue('--border-color').trim();
+
+  sections.forEach((s, idx) => {
+    if (s.type !== 'chart') return;
+
+    const ctx = document.getElementById('chart-' + (idx + 1)).getContext('2d');
+    const datasets = s.data.datasets.map((ds, dIdx) => {
+      const colors = [accentColor, successColor, '#3b82f6', '#8b5cf6'];
+      const baseColor = colors[dIdx % colors.length];
+
+      return {
+        label: ds.label,
+        data: ds.data,
+        borderColor: baseColor,
+        backgroundColor: (context) => {
+          const chart = context.chart;
+          const {ctx, chartArea} = chart;
+          if (!chartArea) return null;
+          const gradient = ctx.createLinearGradient(0, chartArea.top, 0, chartArea.bottom);
+          gradient.addColorStop(0, baseColor + '40'); // 25% opacity
+          gradient.addColorStop(1, baseColor + '00'); // transparent
+          return gradient;
+        },
+        fill: true,
+        tension: 0.4,
+        pointRadius: 0,
+        borderWidth: 2,
+      };
+    });
+
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: s.data.labels,
+        datasets: datasets
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            display: true,
+            position: 'top',
+            align: 'end',
+            labels: {
+              color: labelColor,
+              boxWidth: 10,
+              font: { size: 10, family: 'JetBrains Mono' }
+            }
+          },
+          tooltip: { enabled: false }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: {
+              color: labelColor,
+              font: { size: 9, family: 'JetBrains Mono' },
+              maxRotation: 0,
+              autoSkip: true,
+              maxTicksLimit: 8
+            }
+          },
+          y: {
+            beginAtZero: true,
+            grid: {
+              color: borderColor + '20', // dim border
+              drawBorder: false
+            },
+            ticks: {
+              color: labelColor,
+              font: { size: 9, family: 'JetBrains Mono' },
+              precision: 0
+            }
+          }
+        }
+      }
+    });
+  });
+});
+</script>
 </body>
 </html>

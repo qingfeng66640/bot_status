@@ -180,6 +180,67 @@ class StatusManager:
             "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
 
+    # ------------------------------------------------------------------
+    # 趋势图数据 (Hourly Binning)
+    # ------------------------------------------------------------------
+
+    async def get_hourly_trends(self, hours: int = 24) -> dict[str, Any]:
+        """获取最近 N 小时的小时级趋势数据。
+
+        Args:
+            hours: 回溯小时数。
+        """
+        now = time.time()
+        start_ts = now - hours * 3600
+
+        # 1. 准备时间轴 (Labels)
+        labels = []
+        for i in range(hours + 1):
+            ts = start_ts + i * 3600
+            labels.append(datetime.fromtimestamp(ts).strftime("%H:00"))
+
+        # 2. 获取消息趋势 (Python Binning)
+        msgs = await QueryBuilder(Messages).filter(time__gte=start_ts).all()
+        msg_inbound = [0] * (hours + 1)
+        msg_outbound = [0] * (hours + 1)
+
+        for m in msgs:
+            # 计算偏移小时数
+            offset = int((m.time - start_ts) // 3600)
+            if 0 <= offset <= hours:
+                if m.person_id == "bot":
+                    msg_outbound[offset] += 1
+                else:
+                    msg_inbound[offset] += 1
+
+        # 3. 获取 LLM 趋势 (SQL Aggregation)
+        llm_collector = get_llm_stats_collector()
+        llm_stats = await llm_collector.get_hourly_stats(hours=hours)
+        llm_requests = [0] * (hours + 1)
+        llm_tokens = [0] * (hours + 1)
+
+        # llm_stats 返回的是有数据的点，需要映射到我们的 labels 偏移量上
+        for s in llm_stats:
+            # 找到最匹配的时间点
+            s_ts = s["timestamp"]
+            offset = int((s_ts - start_ts) // 3600)
+            if 0 <= offset <= hours:
+                llm_requests[offset] = s["total_requests"]
+                llm_tokens[offset] = s["total_tokens"]
+
+        return {
+            "hours": hours,
+            "labels": labels,
+            "messages": {
+                "inbound": msg_inbound,
+                "outbound": msg_outbound,
+            },
+            "llm": {
+                "requests": llm_requests,
+                "tokens": llm_tokens,
+            }
+        }
+
 
 _status_manager: StatusManager | None = None
 

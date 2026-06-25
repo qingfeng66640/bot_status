@@ -490,6 +490,16 @@ class ImageRenderer:
         """将原始 sections 转为模板所需的格式，处理值和样式。"""
         result = []
         for sec in sections:
+            if sec.get("type") == "chart":
+                result.append({
+                    "title": sec["title"],
+                    "type": "chart",
+                    "chart_type": sec.get("chart_type", "area"),
+                    "data": sec["data"],
+                    "accent": sec.get("accent") or _accent_class(sec["title"]),
+                })
+                continue
+
             rows = []
             for key, value in sec.get("rows", []):
                 display, css = self._format_value(key, value)

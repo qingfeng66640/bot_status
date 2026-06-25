@@ -1,23 +1,15 @@
 ## 更新内容
 
 ### 新功能
-- 新增 `permission_level` 配置项，支持自定义命令最低权限级别（owner/operator/user/guest）
-  - 默认 `"operator"`，设为 `"user"` 即可让普通用户也使用 `/status` 系列命令
-  - 配置路径：`[plugin]` > `permission_level`
-- 新增 `text_color`、`label_color`、`metric_color`、`title_color` 四种字体颜色自定义配置
-  - `text_color`: 卡片标题颜色
-  - `label_color`: 标签文字颜色
-  - `metric_color`: 所有数据行值颜色（数值、字符串、列表等）
-  - `title_color`: header 主标题颜色
-- 所有数据行值统一使用 metric_color，一色控全局
+- 新增 **数据趋势图表**：支持在 `/status` 图片中以面积图展示过去 N 小时的出入站消息趋势和 LLM 使用趋势。
+  - 默认展示过去 24 小时，默认粒度 1 小时。
+  - 支持配置：`[chart]` > `enabled` (是否开启) 和 `hours` (展示时长)。
+  - UI 参照工业级终端风格，支持渐变填充。
+- 新增 `permission_level` 配置项，支持自定义命令最低权限级别（owner/operator/user/guest）。
 
-### 修复
-- 修复出站消息数始终显示 0 的 bug（person_id 查询条件从 isnull 改为 "bot"）
-- Chromium 多级缓存检测，避免每次重启都重新下载
-- Chromium 安装到插件 data/playwright 目录，Docker 容器重启后自动复用
-
-### 改进
-- 移除 is_count_key 关键词判断，所有 int 值统一使用 num CSS 类
-- `.row-value` 和 `.row-value.str` 兜底颜色使用 metric_color
+### 优化
+- **SQL 级聚合**：LLM 统计现在使用数据库原生聚合，提升大数据量下的响应速度。
+- **本地化渲染**：引入 Chart.js 提升图表美观度。
+- 移除 ch_1 标识与冗余表情包，界面更加专业净化。
 
 🎉 由 Claude Code 构建
